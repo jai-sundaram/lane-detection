@@ -182,18 +182,89 @@ roi = cv2.bitwise_and(canny, mask)
 #the seventh argument is the maximum line gap - maximum distance in pixels between segmented lines which can be connected into a single line
 lines = cv2.HoughLinesP(roi, 2, np.pi/180, 100, np.array([]), minLineLength=40, maxLineGap=5)
 
+
+#now looking out the lines that we drew on the image, we can see that there are multiple different lines for both sides, which kinda looks weird
+#instead, we can just have 2 lines (one for each side of the lane) by averaging the y intercept and slope of all the lines
+left_fit = []
+right_fit = []
+#left_fit will contain the averaged lines on the left side of the lane
+#right_fit will contain the averages lines on the right side of the lane
+for line in lines:
+    #we will again do the same thing where we make each line segment 1d (x1,y1,x2,y2) like we did before
+    #reshaping it
+    x1,y1,x2,y2 = line.reshape(4)
+    # we want to pretty much get parameters like the y intercept and slope
+    #using the polyfit function it will fit in a polynomial function with form y = mx+b to the x and y points
+    #then it will return a vector of coefficients that describe the y intercept
+    #the first parameter are the set of x coordinates
+    #second parameter are the set of y coordinates
+    #third parameter is the degree of the polynomial - in this case it is of first degree
+    parameters = np.polyfit((x1,x2), (y1,y2),1)
+    #first index in return value is slope, y intercept is 2nd index
+    slope = parameters[0]
+    intercept = parameters[1]
+    #now we have to check if the slope of the line corresponds to a line on the left side or right side
+    #remember that in this case, the y values decrease as we go towards the bottom
+    #on the left side of the lane, as x increases the line goes up (meaning y decreases)
+    #on the right side of the line, as x increase the line goes down
+    #so lines on the left side of the lane will have a negative slope, lines on the right side of the lane will have a positive slope
+    #so now, we will start appending each lines slope and y intercept as a tuple to either the left or right side lines, based on value of slope
+    if slope < 0:
+        left_fit.append((slope, intercept))
+    else:
+        right_fit.append((slope, intercept))
+#now let us average the slopes and intercepts for both sides
+#axis = 0 will average all the rows in each column
+left_fit_average  = np.average(left_fit, axis = 0)
+right_fit_average = np.average(right_fit, axis = 0)
+#this will contain the average slope and y intercept of the overall line we will eventually draw for left and right side
+#now we have to create the (x1,y1) and (x2,y2) coordinates for the two final lines from the slope and y intercept
+#doing for the left side first
+slope = left_fit_average[0]
+y_intercept = left_fit_average[1]
+#y1 will be the height of the image (bottom of the image)
+#get the height by accesing the first index from the shape function of the image
+y1 = int(lane_gray.shape[0])
+#y2 will be about 60% of the images height
+y2 = int(lane_gray.shape[0] * (3/5))
+#so now the line starts from the bottom and goes 3/ths of the way upwards
+#now we want to get the corresponding x1, and x2 values for the y1, y2 values
+#we can figure out this algebraically
+#y=mx+b
+# x = (y-b)/m
+#do this for both x1 and x2
+x1 = int((y1-y_intercept) / slope)
+x2 = int((y2-y_intercept) / slope)
+left_line = np.array([x1,y1, x2, y2])
+#repeat the same process for the right line
+slope = right_fit_average[0]
+y_intercept = right_fit_average[1]
+y1 = int(lane_gray.shape[0])
+y2 = int(lane_gray.shape[0] * (3/5))
+x1 = int((y1-y_intercept) / slope)
+x2 = int((y2-y_intercept) / slope)
+right_line = np.array([x1,y1, x2, y2])
+#we can see that both lines will have the same vertical coordinates - they will start at the very bottom
+#they will both go upwards 3/5ths of the image up
+#but their horizontal coordinates will be different because they are dependent on the slope and y intercept
+#now we have to put these x1 y1 x2 y2 of both lines into one combined numpy array so it matches the HoughLinesP function output
+averaged_lines = np.array([left_line, right_line])
+
 #now we want to display these lines on the real/original image
 #first we will create a blank/completely black image that has the same shape as the og image
 line_img = np.zeros_like(lane_copy2)
 #now we will first makes sure that there were actually lines extracted from that image and get the segments of them
-if lines is not None:
-    for line in lines:
-        #we have to reshape every line segment into a 1D array [x1,y1,x2,y2] but it is currently a 4d array
-        #reshaping it into a one dimensional array with 4 elements (x1,y1,x2,y2)
+if averaged_lines is not None:
+    for line in averaged_lines:
+        #we need x1 y1 x2 y2 for the endpoints
         x1, y1, x2, y2 = line.reshape(4)
         #now let us draw each line on that blank image
         #again first argument is the image we are drawing on, 2nd is first endpoint, 3rd is second endpoint, 4th is the color of the line, 5th is line thickness
         cv2.line(line_img, (x1, y1), (x2,y2), (255, 0, 0), 10)
+
+
+
+
 #so now let us add this to the real image
 #we do this by adding the two images together using the addeighted method
 #it makes sense as to why the background image is black when - when we add it to the real image, the OG pixels of the real image where there are no linens will stay the same because 0 + their intensity is still their intensity
@@ -206,5 +277,10 @@ if lines is not None:
 #second images weight is 1, so its intensity will be 20% more than the original lane image, so the lines will be much more defined
 #fifth is gamma argument - just putting 1, more of a placeholder not making a difference
 img_with_lines = cv2.addWeighted(lane_copy2, 0.8, line_img, 1, 1)
+
+
 cv2.imshow("lines", img_with_lines)
 cv2.waitKey(0)
+
+
+
